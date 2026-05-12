@@ -6,4 +6,7 @@ MUJOCO_LOG.TXT
 findings.md
 progress.md
 task_plan.md
-docs/superpowers/plans/
+docs/superpowers/plans/2026-05-11-openarmx-small-object-grasp.md
+openarmx_visual_grasp_dataset/
+checkpoints/
+*.pth
