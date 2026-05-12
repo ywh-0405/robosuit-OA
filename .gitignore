@@ -1,0 +1,9 @@
+__pycache__/
+*.py[cod]
+.pytest_cache/
+*.xwd
+MUJOCO_LOG.TXT
+findings.md
+progress.md
+task_plan.md
+docs/superpowers/plans/

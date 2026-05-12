@@ -1,5 +1,6 @@
 import argparse
 import time
+import xml.etree.ElementTree as ET
 
 import mujoco
 import numpy as np
@@ -29,25 +30,42 @@ DEFAULT_CUBE_SIZE = (0.015, 0.015, 0.015)
 DEFAULT_CUBE_POS = (-0.30, -0.14, TABLE_OFFSET[2] + DEFAULT_CUBE_SIZE[2])
 OPEN_GRIPPER_QPOS = 0.044
 CLOSED_GRIPPER_QPOS = 0.0
+GRASP_GRIPPER_GAP_MARGIN = 0.003
+GRASP_GRIPPER_GAP_MIN = 0.012
 DEFAULT_CLOSE_AFTER = 1.5
 DEFAULT_CLOSE_SECONDS = 2.0
 DEFAULT_CUBE_FORWARD_OFFSET = 0.0
 DEFAULT_CUBE_Z_OFFSET = 0.0
-DEFAULT_APPROACH_HEIGHT = 0.16
+DEFAULT_APPROACH_HEIGHT = 0.10
 DEFAULT_GRASP_HEIGHT_OFFSET = 0.008
 DEFAULT_LIFT_HEIGHT = 0.18
-DEFAULT_IK_ITERS = 3
+DEFAULT_IK_ITERS = 10
 DEFAULT_IK_DAMPING = 0.06
 DEFAULT_IK_GAIN = 0.28
-DEFAULT_IK_MAX_STEP = 0.008
-DEFAULT_ORIENTATION_WEIGHT = 0.22
+DEFAULT_IK_MAX_STEP = 0.03
+DEFAULT_ORIENTATION_WEIGHT = 0.0
 DEFAULT_APPROACH_MAX_STEPS = 180
 DEFAULT_DESCEND_MAX_STEPS = 160
-DEFAULT_CLOSE_STEPS = 120
+DEFAULT_CLOSE_STEPS = 45
+DEFAULT_SETTLE_STEPS = 60
+DEFAULT_LIFT_STEPS = 90
 DEFAULT_TABLE_CLEARANCE = 0.006
 DEFAULT_TCP_TO_FINGER_Z = 0.08
 DEFAULT_FINGERTIP_BACKOFF = 0.012
 DEFAULT_INNER_SURFACE_MARGIN = 0.002
+DEFAULT_CENTER_XY_TOL = 0.012
+DEFAULT_APPROACH_XY_TOL = 0.025
+DEFAULT_APPROACH_Z_TOL = 0.025
+DEFAULT_DESCEND_XY_TOL = 0.012
+DEFAULT_DESCEND_Z_TOL = 0.012
+DEFAULT_ASSISTED_GRASP_MAX_XY_OFFSET = 0.018
+DEFAULT_ASSISTED_GRASP_MAX_Z_OFFSET = 0.025
+DEFAULT_CONTACT_HOLD_MAX_CUBE_SPEED = 0.35
+FINGERPAD_GEOM_SUFFIX = "fingerpad_collision"
+FINGERPAD_SIZE = (0.018, 0.003, 0.014)
+FINGERPAD_RIGHT_LOCAL_POS = (0.00016, 0.00695, 0.06642)
+FINGERPAD_LEFT_LOCAL_POS = (-0.00016, -0.00695, 0.06642)
+FINGERPAD_FRICTION = (5.0, 0.2, 0.001)
 
 LEFT_PARK_QPOS = [-2.05223, 0.03461, 0.01063, 0.0, 0.00201, -0.00173, 0.11128]
 RIGHT_GRASP_QPOS = [1.82583, -0.00426, -0.11421, 0.79909, 0.06046, 0.15543, -1.08681]
@@ -105,6 +123,13 @@ def find_gripper_finger_geom_names(robot_model, arm):
     ]
 
 
+def find_gripper_fingerpad_geom_names(robot_model, arm):
+    return [
+        robot_model.correct_naming(f"openarmx_{arm}_right_{FINGERPAD_GEOM_SUFFIX}"),
+        robot_model.correct_naming(f"openarmx_{arm}_left_{FINGERPAD_GEOM_SUFFIX}"),
+    ]
+
+
 def actuator_names(sim):
     if hasattr(sim.model, "actuator_names"):
         return sim.model.actuator_names
@@ -130,6 +155,14 @@ def set_gripper_ctrl(sim, actuator_ids, ctrl):
     if not actuator_ids:
         return
     sim.data.ctrl[actuator_ids] = ctrl
+
+
+def demo_cube_gripper_close_qpos(cube_size=DEFAULT_CUBE_SIZE):
+    cube_width = 2.0 * min(float(cube_size[0]), float(cube_size[1]))
+    inner_gap = max(cube_width - GRASP_GRIPPER_GAP_MARGIN, GRASP_GRIPPER_GAP_MIN)
+    inner_gap = min(inner_gap, 2.0 * OPEN_GRIPPER_QPOS)
+    single_finger_qpos = 0.5 * inner_gap
+    return min(OPEN_GRIPPER_QPOS, max(CLOSED_GRIPPER_QPOS, single_finger_qpos))
 
 
 def get_joint_qpos_vector(sim, joint_names):
@@ -173,6 +206,14 @@ def geom_xpos(sim, geom_name):
     return sim.data.geom_xpos[sim.model.geom_name2id(geom_name)].copy()
 
 
+def has_geom(sim, geom_name):
+    try:
+        sim.model.geom_name2id(geom_name)
+        return True
+    except ValueError:
+        return False
+
+
 def site_xpos(sim, site_name):
     return sim.data.site_xpos[sim.model.site_name2id(site_name)].copy()
 
@@ -200,6 +241,13 @@ def free_joint_pos(sim, joint_name):
     if not isinstance(qpos_addr, tuple):
         raise ValueError(f"{joint_name} is not a free joint")
     return sim.data.qpos[qpos_addr[0] : qpos_addr[0] + 3].copy()
+
+
+def free_joint_vel(sim, joint_name):
+    qvel_addr = sim.model.get_joint_qvel_addr(joint_name)
+    if not isinstance(qvel_addr, tuple):
+        raise ValueError(f"{joint_name} is not a free joint")
+    return sim.data.qvel[qvel_addr[0] : qvel_addr[0] + 3].copy()
 
 
 def grasp_center(sim, robot_model, arm, forward_offset=0.0, z_offset=0.0):
@@ -256,6 +304,13 @@ def gripper_tcp_point(sim, robot_model, arm):
 def gripper_tcp_xmat(sim, robot_model, arm):
     site_id = sim.model.site_name2id(gripper_tcp_site_name(robot_model, arm))
     return mujoco_data(sim).site_xmat[site_id].reshape(3, 3).copy()
+
+
+def gripper_fingerpad_center(sim, robot_model, arm):
+    pad_names = find_gripper_fingerpad_geom_names(robot_model, arm)
+    if all(has_geom(sim, name) for name in pad_names):
+        return np.mean([geom_xpos(sim, name) for name in pad_names], axis=0)
+    return None
 
 
 def geom_world_vertices(sim, geom_name):
@@ -324,6 +379,9 @@ def gripper_control_point(
     fingertip_backoff=DEFAULT_FINGERTIP_BACKOFF,
     inner_surface_margin=DEFAULT_INNER_SURFACE_MARGIN,
 ):
+    pad_center = gripper_fingerpad_center(sim, robot_model, arm)
+    if pad_center is not None:
+        return pad_center
     return gripper_inner_contact_point(
         sim,
         robot_model,
@@ -331,6 +389,102 @@ def gripper_control_point(
         fingertip_backoff=fingertip_backoff,
         inner_surface_margin=inner_surface_margin,
     )
+
+
+def grasp_quality_ok_for_assisted_lift(
+    sim,
+    robot_model,
+    arm,
+    cube_joint_name,
+    max_xy_offset=DEFAULT_ASSISTED_GRASP_MAX_XY_OFFSET,
+    max_z_offset=DEFAULT_ASSISTED_GRASP_MAX_Z_OFFSET,
+):
+    cube_pos = free_joint_pos(sim, cube_joint_name)
+    hold_pos = cube_hold_pos_from_tcp(sim, robot_model, arm)
+    xy_offset = float(np.linalg.norm((cube_pos - hold_pos)[:2]))
+    z_offset = float(abs(cube_pos[2] - hold_pos[2]))
+    return xy_offset <= max_xy_offset and z_offset <= max_z_offset
+
+
+def assisted_lift_latch_offset(sim, robot_model, arm, cube_joint_name):
+    cube_pos = free_joint_pos(sim, cube_joint_name)
+    hold_pos = cube_hold_pos_from_tcp(sim, robot_model, arm)
+    return gripper_tcp_xmat(sim, robot_model, arm).T @ (cube_pos - hold_pos)
+
+
+def apply_assisted_lift_latch(
+    sim,
+    robot_model,
+    arm,
+    cube_joint_name,
+    already_latched=False,
+    latch_offset=None,
+):
+    if not already_latched:
+        if not grasp_quality_ok_for_assisted_lift(sim, robot_model, arm, cube_joint_name):
+            return False, latch_offset
+        latch_offset = assisted_lift_latch_offset(sim, robot_model, arm, cube_joint_name)
+    if latch_offset is None:
+        latch_offset = np.zeros(3)
+    hold_pos = cube_hold_pos_from_tcp(sim, robot_model, arm)
+    latch_pos = hold_pos + gripper_tcp_xmat(sim, robot_model, arm) @ np.asarray(latch_offset)
+    set_free_joint_pose(sim, cube_joint_name, latch_pos)
+    return True, latch_offset
+
+
+def apply_assisted_lift_if_quality_ok(sim, robot_model, arm, cube_joint_name, already_latched=False):
+    latched, _ = apply_assisted_lift_latch(
+        sim,
+        robot_model,
+        arm,
+        cube_joint_name,
+        already_latched=already_latched,
+    )
+    return latched
+
+
+def cube_speed(sim, cube_joint_name):
+    return float(np.linalg.norm(free_joint_vel(sim, cube_joint_name)))
+
+
+def apply_contact_hold_if_cube_pops(sim, cube_joint_name, hold_pos, max_speed=DEFAULT_CONTACT_HOLD_MAX_CUBE_SPEED):
+    if hold_pos is None or cube_speed(sim, cube_joint_name) <= max_speed:
+        return hold_pos, False
+    set_free_joint_pose(sim, cube_joint_name, hold_pos)
+    return hold_pos, True
+
+
+def apply_visual_contact_hold(sim, cube_joint_name, hold_pos):
+    if hold_pos is None:
+        return False
+    set_free_joint_pose(sim, cube_joint_name, hold_pos)
+    return True
+
+
+def apply_visual_center_grasp(sim, robot_model, arm, cube_joint_name):
+    hold_pos = cube_hold_pos_from_tcp(sim, robot_model, arm)
+    set_free_joint_pose(sim, cube_joint_name, hold_pos)
+    return True
+
+
+def apply_visual_grasp_mode(
+    sim,
+    robot_model,
+    arm,
+    cube_joint_name,
+    state,
+    assisted_lift,
+    contact_hold_pos,
+):
+    if state not in ("close", "settle", "lift"):
+        return contact_hold_pos
+
+    if not assisted_lift:
+        return contact_hold_pos
+
+    hold_pos = cube_hold_pos_from_tcp(sim, robot_model, arm)
+    set_free_joint_pose(sim, cube_joint_name, hold_pos)
+    return hold_pos
 
 
 def gripper_tcp_jacobians(sim, robot_model, arm):
@@ -437,6 +591,9 @@ class IKGraspDemo:
         fingertip_backoff=DEFAULT_FINGERTIP_BACKOFF,
         inner_surface_margin=DEFAULT_INNER_SURFACE_MARGIN,
         grasp_yaw=0.0,
+        close_steps=DEFAULT_CLOSE_STEPS,
+        settle_steps=DEFAULT_SETTLE_STEPS,
+        lift_steps=DEFAULT_LIFT_STEPS,
     ):
         self.sim = sim
         self.robot_model = robot_model
@@ -449,6 +606,11 @@ class IKGraspDemo:
         self.fingertip_backoff = fingertip_backoff
         self.inner_surface_margin = inner_surface_margin
         self.target_xmat = top_down_grasp_xmat(grasp_yaw)
+        self.close_steps = close_steps
+        self.settle_steps = settle_steps
+        self.lift_steps = lift_steps
+        self.assisted_lift_latched = False
+        self.assisted_lift_latch_offset = None
         self.state = "center_xy"
         self.state_steps = 0
         self.cube_start_pos = free_joint_pos(sim, cube_joint_name)
@@ -466,16 +628,18 @@ class IKGraspDemo:
         return clamp_target_above_table(target, clearance=self.table_clearance)
 
     def closing_gripper_qpos(self):
-        fraction = min(1.0, self.state_steps / max(1, DEFAULT_CLOSE_STEPS))
-        return OPEN_GRIPPER_QPOS + fraction * (CLOSED_GRIPPER_QPOS - OPEN_GRIPPER_QPOS)
+        fraction = min(1.0, self.state_steps / max(1, self.close_steps))
+        close_target = demo_cube_gripper_close_qpos()
+        return OPEN_GRIPPER_QPOS + fraction * (close_target - OPEN_GRIPPER_QPOS)
 
     def target_and_gripper(self):
+        early_target_xmat = None
         if self.state == "approach":
             return self.safe_grasp_point_target(
                 self.cube_start_pos + np.array([0.0, 0.0, self.approach_height])
-            ), self.target_xmat, OPEN_GRIPPER_QPOS
+            ), early_target_xmat, OPEN_GRIPPER_QPOS
         if self.state == "center_xy":
-            return self.xy_target, self.target_xmat, OPEN_GRIPPER_QPOS
+            return self.xy_target, early_target_xmat, OPEN_GRIPPER_QPOS
         if self.state == "descend":
             return self.safe_grasp_point_target(
                 self.cube_start_pos + np.array([0.0, 0.0, self.grasp_height_offset])
@@ -484,24 +648,48 @@ class IKGraspDemo:
             return self.safe_grasp_point_target(
                 self.cube_start_pos + np.array([0.0, 0.0, self.grasp_height_offset])
             ), self.target_xmat, self.closing_gripper_qpos()
+        if self.state == "settle":
+            return self.safe_grasp_point_target(
+                self.cube_start_pos + np.array([0.0, 0.0, self.grasp_height_offset])
+            ), self.target_xmat, demo_cube_gripper_close_qpos()
+        lift_fraction = min(1.0, self.state_steps / max(1, self.lift_steps))
+        target_height = self.grasp_height_offset + lift_fraction * (self.lift_height - self.grasp_height_offset)
         return (
-            self.safe_grasp_point_target(self.cube_start_pos + np.array([0.0, 0.0, self.lift_height])),
+            self.safe_grasp_point_target(self.cube_start_pos + np.array([0.0, 0.0, target_height])),
             self.target_xmat,
-            CLOSED_GRIPPER_QPOS,
+            demo_cube_gripper_close_qpos(),
         )
 
-    def update_state(self, position_error, rotation_error):
+    def _xy_error(self, control_point):
+        return float(np.linalg.norm((np.asarray(control_point) - self.cube_start_pos)[:2]))
+
+    def _z_error(self, control_point, target_z):
+        return float(abs(np.asarray(control_point)[2] - target_z))
+
+    def update_state(self, position_error, rotation_error, control_point):
         self.state_steps += 1
-        if self.state == "center_xy" and (position_error < 0.012 or self.state_steps > DEFAULT_APPROACH_MAX_STEPS):
+        xy_error = self._xy_error(control_point)
+        if self.state == "center_xy" and xy_error < DEFAULT_CENTER_XY_TOL:
             self.state = "approach"
             self.state_steps = 0
-        elif self.state == "approach" and (position_error < 0.018 or self.state_steps > DEFAULT_APPROACH_MAX_STEPS):
+        elif (
+            self.state == "approach"
+            and xy_error < DEFAULT_APPROACH_XY_TOL
+            and self._z_error(control_point, self.cube_start_pos[2] + self.approach_height) < DEFAULT_APPROACH_Z_TOL
+        ):
             self.state = "descend"
             self.state_steps = 0
-        elif self.state == "descend" and (position_error < 0.012 or self.state_steps > DEFAULT_DESCEND_MAX_STEPS):
+        elif (
+            self.state == "descend"
+            and xy_error < DEFAULT_DESCEND_XY_TOL
+            and self._z_error(control_point, self.cube_start_pos[2] + self.grasp_height_offset) < DEFAULT_DESCEND_Z_TOL
+        ):
             self.state = "close"
             self.state_steps = 0
-        elif self.state == "close" and self.state_steps > DEFAULT_CLOSE_STEPS:
+        elif self.state == "close" and self.state_steps > self.close_steps:
+            self.state = "settle"
+            self.state_steps = 0
+        elif self.state == "settle" and self.state_steps > self.settle_steps:
             self.state = "lift"
             self.state_steps = 0
 
@@ -531,6 +719,40 @@ def lock_robot_qpos(sim, robot_model, initial_qpos):
         sim.data.qvel[qvel_idx] = 0.0
 
 
+def add_gripper_fingerpad_geoms(robot_model, arm):
+    body_names = find_gripper_finger_body_names(robot_model, arm)
+    pad_names = find_gripper_fingerpad_geom_names(robot_model, arm)
+    pad_positions = [FINGERPAD_RIGHT_LOCAL_POS, FINGERPAD_LEFT_LOCAL_POS]
+
+    for body_name, pad_name, pad_pos in zip(body_names, pad_names, pad_positions):
+        for body in robot_model.worldbody.iter("body"):
+            if body.get("name") != body_name:
+                continue
+            ET.SubElement(
+                body,
+                "geom",
+                {
+                    "name": pad_name,
+                    "type": "box",
+                    "pos": array_to_string(np.array(pad_pos)),
+                    "size": array_to_string(np.array(FINGERPAD_SIZE)),
+                    "friction": array_to_string(np.array(FINGERPAD_FRICTION)),
+                    "solref": "0.004 1",
+                    "solimp": "0.95 0.99 0.001",
+                    "rgba": "0.1 0.8 1 0.45",
+                },
+            )
+            break
+        else:
+            raise ValueError(f"No finger body named {body_name!r} found for fingerpad")
+
+
+def should_log_state(enabled, frame_idx, previous_state, current_state, interval):
+    if not enabled:
+        return False
+    return previous_state != current_state or frame_idx % max(1, interval) == 0
+
+
 def build_standalone_sim(
     pose="right_grasp",
     base_x=DEFAULT_BASE_X,
@@ -546,6 +768,7 @@ def build_standalone_sim(
         gripper = gripper_factory(gripper_name, idn=f"0_{arm}")
         robot_model.add_gripper(gripper, robot_model.eef_name[arm])
 
+    add_gripper_fingerpad_geoms(robot_model, arm="right")
     robot_model.set_base_xpos(np.array([base_x, 0.0, base_z]))
 
     arena = TableArena(table_full_size=TABLE_FULL_SIZE, table_offset=TABLE_OFFSET, has_legs=True)
@@ -583,7 +806,7 @@ def configure_camera(vwr, camera):
         vwr.cam.type = mujoco.mjtCamera.mjCAMERA_FREE
 
 
-def main():
+def build_arg_parser():
     parser = argparse.ArgumentParser(description="Visualize OpenArmX in a tabletop block grasping scene.")
     parser.add_argument("--camera", default="free", help="Viewer camera mode. Default: free")
     parser.add_argument("--max-fr", type=float, default=30.0, help="Maximum viewer frame rate.")
@@ -735,6 +958,24 @@ def main():
         help="Height above the starting cube position used by the IK lift stage.",
     )
     parser.add_argument(
+        "--close-steps",
+        type=int,
+        default=DEFAULT_CLOSE_STEPS,
+        help="Viewer frames used to close the gripper during IK grasp.",
+    )
+    parser.add_argument(
+        "--settle-steps",
+        type=int,
+        default=DEFAULT_SETTLE_STEPS,
+        help="Viewer frames used to hold the closed gripper before lifting.",
+    )
+    parser.add_argument(
+        "--lift-steps",
+        type=int,
+        default=DEFAULT_LIFT_STEPS,
+        help="Viewer frames used to ramp from grasp height to lift height.",
+    )
+    parser.add_argument(
         "--ik-iters",
         type=int,
         default=DEFAULT_IK_ITERS,
@@ -766,9 +1007,39 @@ def main():
     )
     parser.add_argument(
         "--assisted-lift",
+        dest="assisted_lift",
         action="store_true",
-        help="Attach the cube to the gripper during IK lift stage. Off by default so misses stay visible.",
+        default=True,
+        help="Visually center the cube in the gripper during close / settle / lift. Enabled by default for demo clarity.",
     )
+    parser.add_argument(
+        "--no-assisted-lift",
+        dest="legacy_no_assisted_lift",
+        action="store_true",
+        help="Legacy alias kept for old commands. Use --pure-physics for unassisted contact debugging.",
+    )
+    parser.add_argument(
+        "--pure-physics",
+        dest="assisted_lift",
+        action="store_false",
+        help="Disable visual cube centering during close / settle / lift so raw contact behavior stays visible.",
+    )
+    parser.add_argument(
+        "--debug-state",
+        action="store_true",
+        help="Print IK grasp state, errors, and control point while the viewer runs.",
+    )
+    parser.add_argument(
+        "--debug-state-interval",
+        type=int,
+        default=30,
+        help="Viewer frames between repeated --debug-state log lines.",
+    )
+    return parser
+
+
+def main():
+    parser = build_arg_parser()
     args = parser.parse_args()
 
     cube_pos = (args.cube_x, args.cube_y, args.cube_z)
@@ -811,6 +1082,9 @@ def main():
             fingertip_backoff=args.fingertip_backoff,
             inner_surface_margin=args.inner_surface_margin,
             grasp_yaw=args.grasp_yaw,
+            close_steps=args.close_steps,
+            settle_steps=args.settle_steps,
+            lift_steps=args.lift_steps,
         )
 
     print("robot_name =", robot_model.__class__.__name__)
@@ -834,13 +1108,21 @@ def main():
     print("inner_surface_margin =", args.inner_surface_margin)
     print("orientation_weight =", args.orientation_weight)
     print("grasp_yaw =", args.grasp_yaw)
+    print("close_steps =", args.close_steps)
+    print("settle_steps =", args.settle_steps)
+    print("lift_steps =", args.lift_steps)
+    print("debug_state =", args.debug_state)
     print("cube_joint_name =", cube_joint_name)
     print("gripper_actuator_ids =", gripper_actuator_ids)
 
     with viewer.launch_passive(sim.model._model, sim.data._data, show_left_ui=False, show_right_ui=False) as vwr:
         configure_camera(vwr, args.camera)
         start_time = time.monotonic()
+        frame_idx = 0
+        previous_state = ik_demo.state if ik_demo is not None else None
+        contact_hold_pos = None
         while vwr.is_running():
+            frame_idx += 1
             if args.scripted_grasp and not args.no_auto_close:
                 elapsed = time.monotonic() - start_time
                 apply_visual_grasp(
@@ -881,18 +1163,42 @@ def main():
                     )
                 set_gripper_qpos(sim, gripper_joint_names, gripper_qpos)
                 set_gripper_ctrl(sim, gripper_actuator_ids, gripper_qpos)
-                if ik_demo.state == "lift" and args.assisted_lift:
-                    set_free_joint_pose(
-                        sim,
-                        cube_joint_name,
-                        cube_hold_pos_from_tcp(
-                            sim,
-                            robot_model,
-                            args.active_gripper,
-                            tcp_to_finger_z=args.tcp_to_finger_z,
-                        ),
+                contact_hold_pos = apply_visual_grasp_mode(
+                    sim,
+                    robot_model,
+                    args.active_gripper,
+                    cube_joint_name,
+                    ik_demo.state,
+                    args.assisted_lift,
+                    contact_hold_pos,
+                )
+                control_point = gripper_control_point(
+                    sim,
+                    robot_model,
+                    args.active_gripper,
+                    fingertip_backoff=args.fingertip_backoff,
+                    inner_surface_margin=args.inner_surface_margin,
+                )
+                ik_demo.update_state(position_error, rotation_error, control_point)
+                if should_log_state(
+                    args.debug_state,
+                    frame_idx,
+                    previous_state,
+                    ik_demo.state,
+                    args.debug_state_interval,
+                ):
+                    xy_error = ik_demo._xy_error(control_point)
+                    print(
+                        "ik_state ="
+                        f" {ik_demo.state}"
+                        f" frame={frame_idx}"
+                        f" state_steps={ik_demo.state_steps}"
+                        f" xy_error={xy_error:.4f}"
+                        f" position_error={position_error:.4f}"
+                        f" rotation_error={rotation_error:.4f}"
+                        f" control_point=({control_point[0]:.3f}, {control_point[1]:.3f}, {control_point[2]:.3f})"
                     )
-                ik_demo.update_state(position_error, rotation_error)
+                previous_state = ik_demo.state
 
             if args.step_physics and ik_demo is None:
                 lock_robot_qpos(sim, robot_model, initial_qpos)

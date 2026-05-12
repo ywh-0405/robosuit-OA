@@ -45,27 +45,33 @@ Optional:
 python run_openarmx_standalone_viewer.py --pose zero
 python run_openarmx_standalone_viewer.py --pose right_grasp --base-z 0.4
 python run_openarmx_standalone_viewer.py --cube-x -0.30 --cube-y -0.14 --cube-z 0.815
-python run_openarmx_standalone_viewer.py --approach-height 0.16 --grasp-height-offset 0.008 --lift-height 0.18
+python run_openarmx_standalone_viewer.py --approach-height 0.10 --grasp-height-offset 0.008 --lift-height 0.18
 python run_openarmx_standalone_viewer.py --fingertip-backoff 0.012 --table-clearance 0.006
-python run_openarmx_standalone_viewer.py --ik-iters 3 --ik-gain 0.28 --ik-max-step 0.008
-python run_openarmx_standalone_viewer.py --orientation-weight 0.22 --grasp-yaw 0.0
-python run_openarmx_standalone_viewer.py --assisted-lift
+python run_openarmx_standalone_viewer.py --ik-iters 10 --ik-gain 0.28 --ik-max-step 0.03
+python run_openarmx_standalone_viewer.py --orientation-weight 0.0 --grasp-yaw 0.0 --close-steps 45 --settle-steps 60
+python run_openarmx_standalone_viewer.py --debug-state
+python run_openarmx_standalone_viewer.py --assisted-lift --debug-state
+python run_openarmx_standalone_viewer.py --pure-physics --debug-state
 python run_openarmx_standalone_viewer.py --scripted-grasp
 ```
 
 Notes:
 
-- Default mode uses a slow UR5e-style staged grasp with MuJoCo physics enabled: align x/y over the cube center first, rotate the gripper top-down, descend vertically, close slowly, then lift.
+- Default mode uses a staged small-object grasp with MuJoCo physics enabled: align x/y over the cube center first, approach by position, descend, close, settle, then lift.
 - `--pose right_grasp` is the default starting pose for the right-arm IK solver.
 - `--base-z` defaults to `0.4`, so the robot is lifted above the table.
 - The cube is placed on the tabletop by `--cube-x`, `--cube-y`, `--cube-z`; table top is `z=0.8`.
 - `--grasp-height-offset` defaults to `0.008`, so the gripper closes around the upper half of the cube instead of pressing down into the table.
-- The IK target is computed from the two finger collision meshes, not from a guessed TCP offset.
-- Default mode does not attach the cube to the gripper; misses stay visible. Use `--assisted-lift` only as an explicit old-style debug aid.
+- The IK target is computed from explicit fingerpad collision boxes added to the right gripper at runtime, not from a guessed TCP offset.
+- The gripper closes each finger to half of the desired inner jaw gap. This matters because OpenArmX has two independent slide joints; commanding the total gap to each finger leaves the jaw twice too open.
+- Default mode is a visual centered-grasp demo: once close / settle / lift begins, the cube center is placed at the center of the two right fingerpads and then follows that center upward during lift.
+- `--no-assisted-lift` is kept as a legacy flag for old commands and still runs the visual centered-grasp demo. Use `--pure-physics` when you deliberately want to turn off visual cube centering and inspect raw contact behavior.
+- A strict `--pure-physics` lift is not reliable yet with the current OpenArmX finger collision geometry and kinematic IK qpos stepping: very small cubes can contact the fingers but still slip instead of lifting consistently.
+- IsaacLab's minimal OpenArmX scripts are not directly comparable to this raw-contact lift test: they load a USD articulation and drive joints through implicit PD actuators, while this robosuite demo computes IK and writes joint qpos directly.
 - Use `--no-step-physics` only for static inspection. Real contact grasping needs the default physics stepping.
 - If the fingers still touch the table, try `--grasp-height-offset 0.012 --table-clearance 0.01`.
 - If the gripper still nudges the cube sideways, try `--ik-gain 0.20 --ik-max-step 0.005`.
-- If the gripper approaches from the wrong yaw, try `--grasp-yaw 1.5708`.
+- If the gripper approaches from the wrong yaw, try `--orientation-weight 0.08 --grasp-yaw 1.5708`.
 - Use `--scripted-grasp` only for the older visual demo that keeps the cube centered between the gripper fingers.
 
 ## Expected Result
