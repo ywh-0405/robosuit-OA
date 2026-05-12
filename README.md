@@ -87,6 +87,42 @@ For the viewer script:
 - default behavior uses zero action, so you can inspect the initial pose steadily
 - `--random-action` makes the robot and pot move around for a quick visual check
 
+## Collect Data And Train RL
+
+This pipeline still uses your OpenArmX dual-arm robot model. The current first training target controls the right arm / right gripper for the small-cube grasp, while the left arm is parked open. The UR5e thesis project is only used as the reference pattern for data format, replay buffer, DDPG+BC training, and evaluation.
+
+Collect visual centered-grasp expert data:
+
+```bash
+conda activate robosuit
+cd /home/y/Desktop/openarmx_robosuite_example
+python collect_openarmx_data.py --episodes 20 --max-steps 220
+```
+
+This writes compressed episodes to `openarmx_visual_grasp_dataset/`. Each `.npz` contains `obs`, `actions`, `rewards`, `next_obs`, `dones`, `success`, and `episode_length`, matching the structure used by the UR5e reference training code.
+
+Train DDPG+BC from those demonstrations:
+
+```bash
+python train_openarmx_ddpg_bc.py \
+  --dataset-dir openarmx_visual_grasp_dataset \
+  --checkpoint checkpoints/openarmx_visual_actor.pth \
+  --pretrain-steps 200 \
+  --total-steps 1000
+```
+
+PyTorch must be installed inside the `robosuit` conda environment before training. The current environment can collect data, but training will stop with a clear PyTorch-required message if `torch` is missing.
+
+Evaluate a trained actor:
+
+```bash
+python evaluate_openarmx_policy.py \
+  --checkpoint checkpoints/openarmx_visual_actor.pth \
+  --episodes 5
+```
+
+Use `--render` on evaluation only when you want a headed MuJoCo viewer. For bulk data collection and training, keep rendering off so the run does not appear stuck behind a GUI window.
+
 If you later want, I can also add:
 
 - an on-screen renderer version
