@@ -1,4 +1,5 @@
 import argparse
+import time
 from contextlib import nullcontext
 
 import numpy as np
@@ -15,6 +16,12 @@ def build_arg_parser():
     parser.add_argument("--max-steps", type=int, default=220)
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--render", action="store_true", default=False)
+    parser.add_argument(
+        "--render-delay",
+        type=float,
+        default=0.0,
+        help="Seconds to sleep after each rendered policy step. Use with --render for slower playback.",
+    )
     parser.add_argument("--random-cube-pos", action="store_true", default=False)
     parser.add_argument("--cube-x-range", type=float, nargs=2, default=[-0.305, -0.270])
     parser.add_argument("--cube-y-range", type=float, nargs=2, default=[-0.16, -0.12])
@@ -81,6 +88,8 @@ def evaluate(args):
                 steps += 1
                 if vwr is not None:
                     vwr.sync()
+                    if args.render_delay > 0:
+                        time.sleep(args.render_delay)
 
         rewards.append(total_reward)
         lengths.append(steps)

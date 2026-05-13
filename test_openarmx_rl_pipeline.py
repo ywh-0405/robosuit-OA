@@ -149,6 +149,7 @@ def test_evaluate_parser_defaults_are_headless_and_short():
     assert args.checkpoint == "checkpoints/openarmx_visual_actor.pth"
     assert args.episodes <= 10
     assert args.render is False
+    assert args.render_delay == 0.0
     assert args.random_cube_pos is False
     assert args.cube_x_range == [-0.305, -0.270]
     assert args.cube_y_range == [-0.16, -0.12]

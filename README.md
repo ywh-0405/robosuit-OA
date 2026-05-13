@@ -163,6 +163,18 @@ python evaluate_openarmx_policy.py \
   --random-cube-pos
 ```
 
+Slow headed visualization:
+
+```bash
+python evaluate_openarmx_policy.py \
+  --checkpoint checkpoints/openarmx_visual_actor_random.pth \
+  --episodes 10 \
+  --max-steps 220 \
+  --random-cube-pos \
+  --render \
+  --render-delay 0.03
+```
+
 If you later want, I can also add:
 
 - an on-screen renderer version
