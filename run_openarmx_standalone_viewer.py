@@ -61,6 +61,7 @@ DEFAULT_DESCEND_Z_TOL = 0.012
 DEFAULT_ASSISTED_GRASP_MAX_XY_OFFSET = 0.018
 DEFAULT_ASSISTED_GRASP_MAX_Z_OFFSET = 0.025
 DEFAULT_CONTACT_HOLD_MAX_CUBE_SPEED = 0.35
+DEFAULT_VISUAL_GRASP_BLEND = 0.18
 FINGERPAD_GEOM_SUFFIX = "fingerpad_collision"
 FINGERPAD_SIZE = (0.018, 0.003, 0.014)
 FINGERPAD_RIGHT_LOCAL_POS = (0.00016, 0.00695, 0.06642)
@@ -475,6 +476,7 @@ def apply_visual_grasp_mode(
     state,
     assisted_lift,
     contact_hold_pos,
+    blend=DEFAULT_VISUAL_GRASP_BLEND,
 ):
     if state not in ("close", "settle", "lift"):
         return contact_hold_pos
@@ -482,7 +484,10 @@ def apply_visual_grasp_mode(
     if not assisted_lift:
         return contact_hold_pos
 
-    hold_pos = cube_hold_pos_from_tcp(sim, robot_model, arm)
+    target_hold_pos = cube_hold_pos_from_tcp(sim, robot_model, arm)
+    current_pos = free_joint_pos(sim, cube_joint_name)
+    blend = float(np.clip(blend, 0.0, 1.0))
+    hold_pos = current_pos + blend * (target_hold_pos - current_pos)
     set_free_joint_pose(sim, cube_joint_name, hold_pos)
     return hold_pos
 

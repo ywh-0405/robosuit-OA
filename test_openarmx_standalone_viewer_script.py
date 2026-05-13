@@ -148,12 +148,13 @@ def test_demo_cube_gripper_close_qpos_maps_total_inner_gap_to_single_finger_qpos
     assert module.np.isclose(2.0 * qpos, expected_inner_gap)
 
 
-def test_visual_grasp_mode_keeps_cube_centered_during_close_and_lift_when_enabled():
+def test_visual_grasp_mode_smoothly_moves_cube_toward_center_when_enabled():
     module = load_script_module()
     sim, robot_model = module.build_standalone_sim()
     cube_joint_name = module.find_free_joint_name(sim, "cube")
     pad_center = module.gripper_fingerpad_center(sim, robot_model, "right")
-    module.set_free_joint_pose(sim, cube_joint_name, pad_center + module.np.array([0.02, 0.0, 0.0]))
+    displaced = pad_center + module.np.array([0.02, 0.0, 0.0])
+    module.set_free_joint_pose(sim, cube_joint_name, displaced)
 
     hold_pos = module.apply_visual_grasp_mode(
         sim,
@@ -165,7 +166,9 @@ def test_visual_grasp_mode_keeps_cube_centered_during_close_and_lift_when_enable
         contact_hold_pos=None,
     )
 
-    assert module.np.linalg.norm(module.free_joint_pos(sim, cube_joint_name) - pad_center) < 1e-9
+    moved_pos = module.free_joint_pos(sim, cube_joint_name)
+    assert module.np.linalg.norm(moved_pos - pad_center) < module.np.linalg.norm(displaced - pad_center)
+    assert module.np.linalg.norm(moved_pos - pad_center) > 1e-6
 
     stale_contact_hold = pad_center + module.np.array([0.0, 0.0, -0.05])
     module.set_free_joint_pose(sim, cube_joint_name, stale_contact_hold)
@@ -179,8 +182,9 @@ def test_visual_grasp_mode_keeps_cube_centered_during_close_and_lift_when_enable
         contact_hold_pos=stale_contact_hold,
     )
 
-    assert module.np.linalg.norm(module.free_joint_pos(sim, cube_joint_name) - pad_center) < 1e-9
-    assert module.np.linalg.norm(hold_pos - pad_center) < 1e-9
+    moved_lift_pos = module.free_joint_pos(sim, cube_joint_name)
+    assert module.np.linalg.norm(moved_lift_pos - pad_center) < module.np.linalg.norm(stale_contact_hold - pad_center)
+    assert module.np.linalg.norm(hold_pos - pad_center) > 1e-6
 
 
 def test_pure_physics_visual_grasp_mode_leaves_cube_dynamic():
