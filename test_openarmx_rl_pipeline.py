@@ -37,6 +37,27 @@ def test_visual_grasp_env_reset_and_step_shapes():
     assert "fingerpad_center" in step_info
 
 
+def test_visual_grasp_env_can_randomize_cube_xy_with_seed():
+    from openarmx_rl.env import OpenArmXVisualGraspEnv
+
+    env = OpenArmXVisualGraspEnv(
+        max_steps=5,
+        randomize_cube_pos=True,
+        cube_x_range=(-0.305, -0.270),
+        cube_y_range=(-0.16, -0.12),
+    )
+
+    _obs_a, info_a = env.reset(seed=1)
+    cube_a = info_a["cube_pos"].copy()
+    _obs_b, info_b = env.reset(seed=2)
+    cube_b = info_b["cube_pos"].copy()
+
+    assert -0.305 <= cube_a[0] <= -0.270
+    assert -0.16 <= cube_a[1] <= -0.12
+    assert cube_a[2] == pytest.approx(0.815, abs=1e-6)
+    assert not np.allclose(cube_a[:2], cube_b[:2])
+
+
 def test_save_episode_npz_writes_ur5e_compatible_fields(tmp_path):
     from openarmx_rl.env import save_episode_npz
 
@@ -76,6 +97,9 @@ def test_collect_parser_defaults_are_small_and_headless():
     assert args.episodes <= 10
     assert args.render is False
     assert args.output_dir == "openarmx_visual_grasp_dataset"
+    assert args.random_cube_pos is False
+    assert args.cube_x_range == [-0.305, -0.270]
+    assert args.cube_y_range == [-0.16, -0.12]
 
 
 def test_collect_episode_noise_does_not_require_env_rng():
@@ -112,6 +136,9 @@ def test_train_parser_defaults_are_smoke_sized():
     assert args.pretrain_steps <= 200
     assert args.total_steps <= 1000
     assert args.batch_size <= 128
+    assert args.random_cube_pos is False
+    assert args.cube_x_range == [-0.305, -0.270]
+    assert args.cube_y_range == [-0.16, -0.12]
 
 
 def test_evaluate_parser_defaults_are_headless_and_short():
@@ -122,6 +149,21 @@ def test_evaluate_parser_defaults_are_headless_and_short():
     assert args.checkpoint == "checkpoints/openarmx_visual_actor.pth"
     assert args.episodes <= 10
     assert args.render is False
+    assert args.random_cube_pos is False
+    assert args.cube_x_range == [-0.305, -0.270]
+    assert args.cube_y_range == [-0.16, -0.12]
+
+
+def test_record_video_parser_defaults_to_trained_actor():
+    module = load_module_from_repo("record_openarmx_policy_video.py", "record_openarmx_policy_video")
+
+    args = module.build_arg_parser().parse_args([])
+
+    assert args.checkpoint == "checkpoints/openarmx_visual_actor.pth"
+    assert args.output == "openarmx_policy_rollout.mp4"
+    assert args.episodes == 1
+    assert args.max_steps == 220
+    assert args.fps == 20
 
 
 def test_replay_buffer_loads_episode_npz(tmp_path):

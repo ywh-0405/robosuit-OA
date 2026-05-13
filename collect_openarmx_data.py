@@ -11,6 +11,9 @@ def build_arg_parser():
     parser.add_argument("--episodes", type=int, default=5)
     parser.add_argument("--max-steps", type=int, default=220)
     parser.add_argument("--noise", type=float, default=0.0)
+    parser.add_argument("--random-cube-pos", action="store_true", default=False)
+    parser.add_argument("--cube-x-range", type=float, nargs=2, default=[-0.305, -0.270])
+    parser.add_argument("--cube-y-range", type=float, nargs=2, default=[-0.16, -0.12])
     parser.add_argument("--render", action="store_true", default=False)
     return parser
 
@@ -43,7 +46,12 @@ def collect_episode(env, noise=0.0):
 
 def main():
     args = build_arg_parser().parse_args()
-    env = OpenArmXVisualGraspEnv(max_steps=args.max_steps)
+    env = OpenArmXVisualGraspEnv(
+        max_steps=args.max_steps,
+        randomize_cube_pos=args.random_cube_pos,
+        cube_x_range=args.cube_x_range,
+        cube_y_range=args.cube_y_range,
+    )
     for episode_index in range(args.episodes):
         episode = collect_episode(env, noise=args.noise)
         path = save_episode_npz(args.output_dir, episode_index, episode)

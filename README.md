@@ -123,6 +123,46 @@ python evaluate_openarmx_policy.py \
 
 Use `--render` on evaluation only when you want a headed MuJoCo viewer. For bulk data collection and training, keep rendering off so the run does not appear stuck behind a GUI window.
 
+### Random Cube Position Training
+
+The first stable random-position range is intentionally small:
+
+- cube x: `-0.305` to `-0.270`
+- cube y: `-0.160` to `-0.120`
+
+This range was chosen because the current right-arm IK expert succeeds reliably there. Wider ranges can be added later as a curriculum.
+
+Collect random-position expert data:
+
+```bash
+python collect_openarmx_data.py \
+  --output-dir openarmx_visual_grasp_dataset_random_tight \
+  --episodes 50 \
+  --max-steps 220 \
+  --random-cube-pos
+```
+
+Train on the random-position dataset and online fine-tune in the same random distribution:
+
+```bash
+python train_openarmx_ddpg_bc.py \
+  --dataset-dir openarmx_visual_grasp_dataset_random_tight \
+  --checkpoint checkpoints/openarmx_visual_actor_random.pth \
+  --pretrain-steps 300 \
+  --total-steps 1500 \
+  --random-cube-pos
+```
+
+Evaluate random-position success rate:
+
+```bash
+python evaluate_openarmx_policy.py \
+  --checkpoint checkpoints/openarmx_visual_actor_random.pth \
+  --episodes 50 \
+  --max-steps 220 \
+  --random-cube-pos
+```
+
 If you later want, I can also add:
 
 - an on-screen renderer version

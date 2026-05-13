@@ -20,6 +20,9 @@ def build_arg_parser():
     parser.add_argument("--exploration-noise", type=float, default=0.1)
     parser.add_argument("--reward-scale", type=float, default=1.0)
     parser.add_argument("--log-interval", type=int, default=100)
+    parser.add_argument("--random-cube-pos", action="store_true", default=False)
+    parser.add_argument("--cube-x-range", type=float, nargs=2, default=[-0.305, -0.270])
+    parser.add_argument("--cube-y-range", type=float, nargs=2, default=[-0.16, -0.12])
     return parser
 
 
@@ -34,7 +37,12 @@ def train(args):
     torch = require_torch()
     set_seed(args.seed)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    env = OpenArmXVisualGraspEnv(max_steps=args.max_episode_steps)
+    env = OpenArmXVisualGraspEnv(
+        max_steps=args.max_episode_steps,
+        randomize_cube_pos=args.random_cube_pos,
+        cube_x_range=args.cube_x_range,
+        cube_y_range=args.cube_y_range,
+    )
     cfg = DDPGConfig(
         seed=args.seed,
         buffer_size=args.buffer_size,

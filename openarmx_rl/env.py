@@ -23,6 +23,10 @@ class OpenArmXVisualGraspEnv:
         success_lift_height=0.12,
         success_center_tolerance=0.02,
         assisted_lift=True,
+        cube_pos=None,
+        randomize_cube_pos=False,
+        cube_x_range=(-0.305, -0.270),
+        cube_y_range=(-0.16, -0.12),
     ):
         self.max_steps = int(max_steps)
         self.action_pos_scale = float(action_pos_scale)
@@ -30,6 +34,13 @@ class OpenArmXVisualGraspEnv:
         self.success_lift_height = float(success_lift_height)
         self.success_center_tolerance = float(success_center_tolerance)
         self.assisted_lift = bool(assisted_lift)
+        self.cube_pos = np.asarray(
+            cube_pos if cube_pos is not None else viewer_demo.DEFAULT_CUBE_POS,
+            dtype=float,
+        )
+        self.randomize_cube_pos = bool(randomize_cube_pos)
+        self.cube_x_range = tuple(float(value) for value in cube_x_range)
+        self.cube_y_range = tuple(float(value) for value in cube_y_range)
         self.sim = None
         self.robot_model = None
         self.cube_joint_name = None
@@ -42,9 +53,8 @@ class OpenArmXVisualGraspEnv:
         self.contact_hold_pos = None
 
     def reset(self, seed=None):
-        if seed is not None:
-            np.random.seed(seed)
-        self.sim, self.robot_model = viewer_demo.build_standalone_sim()
+        cube_pos = self._reset_cube_pos(seed)
+        self.sim, self.robot_model = viewer_demo.build_standalone_sim(cube_pos=cube_pos)
         self.cube_joint_name = viewer_demo.find_free_joint_name(self.sim, "cube")
         self.arm_joint_names = viewer_demo.find_arm_joint_names(self.robot_model, "right")
         self.gripper_joint_names = viewer_demo.find_gripper_joint_names(self.robot_model, "right")
@@ -70,6 +80,15 @@ class OpenArmXVisualGraspEnv:
         self.initial_cube_z = float(viewer_demo.free_joint_pos(self.sim, self.cube_joint_name)[2])
         obs = self._observation()
         return obs, self._info(False, 0.0)
+
+    def _reset_cube_pos(self, seed=None):
+        if not self.randomize_cube_pos:
+            return self.cube_pos.copy()
+        rng = np.random.default_rng(seed)
+        cube_pos = self.cube_pos.copy()
+        cube_pos[0] = rng.uniform(*self.cube_x_range)
+        cube_pos[1] = rng.uniform(*self.cube_y_range)
+        return cube_pos
 
     def step(self, action):
         if self.sim is None:

@@ -15,6 +15,9 @@ def build_arg_parser():
     parser.add_argument("--max-steps", type=int, default=220)
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--render", action="store_true", default=False)
+    parser.add_argument("--random-cube-pos", action="store_true", default=False)
+    parser.add_argument("--cube-x-range", type=float, nargs=2, default=[-0.305, -0.270])
+    parser.add_argument("--cube-y-range", type=float, nargs=2, default=[-0.16, -0.12])
     return parser
 
 
@@ -49,7 +52,12 @@ def evaluate(args):
     torch = require_torch()
     set_seed(args.seed)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    env = OpenArmXVisualGraspEnv(max_steps=args.max_steps)
+    env = OpenArmXVisualGraspEnv(
+        max_steps=args.max_steps,
+        randomize_cube_pos=args.random_cube_pos,
+        cube_x_range=args.cube_x_range,
+        cube_y_range=args.cube_y_range,
+    )
     actor = load_actor(args.checkpoint, env.observation_dim, env.action_dim, device)
 
     rewards = []
